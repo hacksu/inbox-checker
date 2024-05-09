@@ -1,19 +1,20 @@
 import asyncio
+from typing import NamedTuple
+from datetime import datetime
+from itertools import islice
 import json
-from pprint import pprint
 import re
 
+import dateutil
+from html2text import HTML2Text
 import requests
 import discord
-
-
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
+from dateutil.parser import parse as parse_date
 
 
 with open("private.json", encoding="utf-8") as config_file:
     config = json.load(config_file)
-    for key in ("discord_token", "email_password"):
+    for key in ("discord_token", "email_password", "output_channel"):
         assert key in config, f"missing {key} from private.json!"
 
 
@@ -71,31 +72,124 @@ def get_last_email_url(emails: list[str]) -> str:
     return sorted(emails, key=email_url_to_id)[-1]
 
 
+def deduplicate_string(string: str) -> str:
+    """
+    When there's no named sender for an email, the mailing list interface just
+    shows the "from" address twice, which is annoying. This function will make
+    sure a string isn't the same thing twice with a space in the middle.
+    """
+    if len(string) % 2 == 1 and string[:len(string)//2] == string[len(string)//2+1:]:
+        return string[:len(string)//2]
+    return string
+
+
+EmailMetadata = NamedTuple(
+    "EmailMetadata",
+    [("subject", str), ("from_address", str), ("timestamp", datetime)]
+)
+
+def get_email_metadata(session: requests.Session, email_url: str) -> EmailMetadata:
+    """
+        This attempts to parse the somewhat messy HTML on the email page and
+        returns basic information about the email.
+    """
+    email = session.get(email_url).text
+    
+    # convert email page to formatted text
+    parser = HTML2Text()
+    parser.ignore_links = True
+    parser.ignore_mailto_links = True
+    parser.body_width = 1000000  # keep it from wrapping long lines
+    text = parser.handle(email)
+
+    # once we have the email page as formatted text, the subject, "from"
+    # address, and timestamp are on the first three lines of the result
+    meta = list(islice(
+        (l.replace("[Hacksu]", "").strip("#\n _")
+            for l in text.splitlines() if len(l.strip())),
+        3
+    ))
+    return EmailMetadata(
+        meta[0],
+        deduplicate_string(meta[1]),
+        parse_date(
+            meta[2],
+            # need to tell it what EDT and EST mean
+            tzinfos={
+                "EDT": dateutil.tz.gettz("US/Eastern"),
+                "EST": dateutil.tz.gettz("US/Eastern")
+            }
+        )
+    )
+
+
+def formatted_current_time():
+    return (
+        datetime
+            .now(tz=dateutil.tz.gettz("US/Eastern"))
+            .strftime("%A, %B %d, %Y %I:%M:%S %p %Z")
+    )
+
+
+client = discord.Client(intents=discord.Intents.default())
+
 @client.event
 async def on_ready():
+    global config
 
-    print(f'We have logged in as {client.user}')
+    print(f'We have logged in as {client.user} at {formatted_current_time()}')
 
-    # >:D
-    last_email_id = email_url_to_id(get_last_email_url(get_recent_email_urls(login(config["email_password"]))))
+    session = login(config["email_password"])
+    last_email_url = get_last_email_url(get_recent_email_urls(session))
+    last_email_id = email_url_to_id(last_email_url)
+    print(f"will alert for emails with IDs greater than {last_email_id}")
+
+    email_meta = get_email_metadata(session, last_email_url)
+    discord_embed = discord.Embed(
+        title=email_meta.subject,
+        description=f"from {email_meta.from_address}",
+        url=last_email_url,
+        timestamp=email_meta.timestamp
+    )
+    await (
+        client
+            .get_channel(int(config["output_channel"]))
+            .send("Email bot is active. Most recent email in inbox is:", embed=discord_embed)
+    )
 
     while True:
+        # reload config in case it changed
         with open("private.json", encoding="utf-8") as config_file:
             config = json.load(config_file)
         
-        # NOT TESTED:
+        # check for emails newer than the last one observed
+        session = login(config["email_password"])
+        emails = get_recent_email_urls(session)
+        for email_url in emails:
+            if email_url_to_id(email_url) > last_email_id:
+                email_meta = get_email_metadata(session, email_url)
+                discord_embed = discord.Embed(
+                    title=email_meta.subject,
+                    description=f"*from* {email_meta.from_address}",
+                    url=email_url,
+                    timestamp=email_meta.timestamp
+                )
+                print(f"sending message for email {email_url} at {formatted_current_time()}")
+                await (
+                    client
+                       .get_channel(int(config["output_channel"]))
+                       .send("You have mail!", embed=discord_embed)
+                )
         
-        emails = get_recent_email_urls(login(config["email_password"]))
-        for email in emails:
-            if email_url_to_id(email) > last_email_id:
-                print("found new email: " + email)
-        
-        last_email_id = email_url_to_id(get_last_email_url(emails))
+        # update ID of the last email observed
+        new_last_email_id = email_url_to_id(get_last_email_url(emails))
+        if new_last_email_id != last_email_id:
+            print(f"will now alert for emails with IDs greater than {new_last_email_id}")
+            last_email_id = new_last_email_id
 
-        await asyncio.sleep(60)
+        # check again in 3 minutes
+        await asyncio.sleep(60 * 3)
 
-
-# client.run(config["discord_token"])
 
 if __name__ == "__main__":
-    pprint(get_recent_email_urls(login(config["email_password"])))
+    client.run(config["discord_token"])

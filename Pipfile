@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 "discord.py" = "*"
 requests = "*"
+html2text = "*"
+python-dateutil = "*"
 
 [dev-packages]
 
