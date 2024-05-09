@@ -178,7 +178,7 @@ async def on_ready():
                 await (
                     client
                        .get_channel(int(config["output_channel"]))
-                       .send("You have mail!", embed=discord_embed)
+                       .send("You've got mail!", embed=discord_embed)
                 )
         
         # update ID of the last email observed
