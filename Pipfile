@@ -8,6 +8,7 @@ name = "pypi"
 requests = "*"
 html2text = "*"
 python-dateutil = "*"
+tornado = "*"
 
 [dev-packages]
 
