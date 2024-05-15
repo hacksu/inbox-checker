@@ -122,12 +122,11 @@ def get_email_html(session: requests.Session, email_url: str) -> str:
     email = session.get(email_url).text
     # this is where my valiant attempt to avoid hardcoding too much information,
     # like the name of the mailing list, in the url patterns breaks down
-    html_url_pattern = r"https://listmail.cs.kent.edu/mailman/private/hacksu/attachments/\d+/\d+/attachment-0001.htm"
+    html_url_pattern = r"https://listmail.cs.kent.edu/mailman/private/hacksu/attachments/\d+/\w+/attachment-0001.htm"
     match = re.search(html_url_pattern, email)
     if match:
         html_email_page = session.get(match.group(0)).text
         html_email_body = re.search(r"<tt>(.*)</tt>", html_email_page, flags=re.DOTALL).group(1)
         return HTML2Text().handle(html_email_body)
-        # return unescape(html_email_body.replace("<br>", "").replace("\xa0", " "))
     else:
         return email
