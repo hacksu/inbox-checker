@@ -27,7 +27,7 @@ class MainHandler(tornado.web.RequestHandler):
         else:
             framed_document = (
                 get_email_html(login(config["email_password"]), email_url)
-                    .replace("\n", "")  # i don't think this is technically necessary
+                    .replace("\n", " ")  # i don't think this is technically necessary
                     .replace('"', '&quot;')
             )
             self.write(dedent(f"""
