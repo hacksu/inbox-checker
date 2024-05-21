@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from textwrap import dedent
 from urllib.parse import urlencode
 import aiohttp
 
@@ -71,32 +72,55 @@ async def check_mail_forever():
 
     while True:
 
-        # reload config in case it changed
-        config = load_config()
-        
-        # check for emails newer than the last one observed
-        listmail_session = login(config["email_password"])
-        emails = get_recent_email_urls(listmail_session)
-        for email_url in emails:
-            if email_url_to_id(email_url) > last_email_id:
-                email_meta = get_email_metadata(listmail_session, email_url)
-                discord_embed = get_email_metadata_embed(email_meta, email_url)
-                print(f"sending message for email {email_url} at {formatted_current_time()}")
-                async with aiohttp.ClientSession() as webhook_session:
-                    webhook = discord.Webhook.from_url(config["webhook_url"], session=webhook_session)
-                    await webhook.send(
-                        "You've got mail!",
-                        embed = discord_embed,
-                        file = await get_email_image_file(
-                            listmail_session, email_meta, email_url
+        try:
+            # reload config in case it changed
+            config = load_config()
+            
+            # check for emails newer than the last one observed
+            listmail_session = login(config["email_password"])
+            emails = get_recent_email_urls(listmail_session)
+            for email_url in emails:
+                if email_url_to_id(email_url) > last_email_id:
+                    email_meta = get_email_metadata(listmail_session, email_url)
+                    discord_embed = get_email_metadata_embed(email_meta, email_url)
+                    print(f"sending message for email {email_url} at {formatted_current_time()}")
+                    async with aiohttp.ClientSession() as webhook_session:
+                        webhook = discord.Webhook.from_url(
+                            config["webhook_url"], session=webhook_session
                         )
-                    )
+                        await webhook.send(
+                            "You've got mail!",
+                            embed = discord_embed,
+                            file = await get_email_image_file(
+                                listmail_session, email_meta, email_url
+                            )
+                        )
+            
+            # update ID of the last email observed
+            new_last_email_id = email_url_to_id(get_last_email_url(emails))
+            if new_last_email_id != last_email_id:
+                print(f"will now alert for emails with IDs greater than {new_last_email_id}")
+                last_email_id = new_last_email_id
         
-        # update ID of the last email observed
-        new_last_email_id = email_url_to_id(get_last_email_url(emails))
-        if new_last_email_id != last_email_id:
-            print(f"will now alert for emails with IDs greater than {new_last_email_id}")
-            last_email_id = new_last_email_id
+        except Exception as e:
+            async with aiohttp.ClientSession() as webhook_session:
+                error_message = dedent(f"""
+                    Failed to load emails! Error message:
+                    ```
+                    {e}
+                    ```
+                    Trying again in 10 minutes.
+                    """
+                ).strip()
+      
+                await discord.Webhook.from_url(
+                    config["webhook_url"], session=webhook_session
+                ).send(error_message)
+            
+            # wait an extra 7 minutes to try to mitigate spam if something is
+            # persistently wrong
+            await asyncio.sleep(60 * 7)
+                
 
         # check again in 3 minutes
         await asyncio.sleep(60 * 3)
