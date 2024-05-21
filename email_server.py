@@ -3,8 +3,11 @@ import tornado.web
 import tornado.ioloop
 import base64
 
-from config import config
+from config import load_config
 from email_scraper import get_email_html, login
+
+config = load_config()
+
 
 class MainHandler(tornado.web.RequestHandler):
     def get_current_user(self):

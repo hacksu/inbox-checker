@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import json
 from urllib.parse import urlencode
 import aiohttp
 
@@ -9,8 +8,11 @@ import discord
 from slugify import slugify
 
 from email_server import email_view_server
-from config import config
+from config import load_config
 from email_scraper import *
+
+
+config = load_config()
 
 
 def formatted_current_time():
@@ -70,8 +72,7 @@ async def check_mail_forever():
     while True:
 
         # reload config in case it changed
-        with open("private.json", encoding="utf-8") as config_file:
-            config = json.load(config_file)
+        config = load_config()
         
         # check for emails newer than the last one observed
         listmail_session = login(config["email_password"])
