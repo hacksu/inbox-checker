@@ -6,6 +6,7 @@ import aiohttp
 
 import dateutil
 import discord
+from slugify import slugify
 
 from email_server import email_view_server
 from config import config
@@ -33,6 +34,14 @@ def get_email_metadata_embed(email_meta, email_url):
     )
 
 
+async def get_email_image_file(session, email_meta, email_url):
+    image = await get_email_image(session, email_url)
+    return discord.File(
+        image,
+        f"email_{slugify(email_meta.subject)}.png"
+    )
+
+
 async def check_mail_forever():
     global config
 
@@ -49,34 +58,44 @@ async def check_mail_forever():
         discord_embed = get_email_metadata_embed(email_meta, last_email_url)
         await webhook.send(
             "Email bot is active. Most recent email in inbox is:",
-            embed=discord_embed
+            embed = discord_embed,
+            file = await get_email_image_file(
+                listmail_session, email_meta, last_email_url
+            )
         )
 
         if "release_notes" in config and len(config["release_notes"]):
             await webhook.send("Release notes: " + config["release_notes"])
 
     while True:
-        async with aiohttp.ClientSession() as webhook_session:
 
-            # reload config in case it changed
-            with open("private.json", encoding="utf-8") as config_file:
-                config = json.load(config_file)
-            
-            # check for emails newer than the last one observed
-            listmail_session = login(config["email_password"])
-            emails = get_recent_email_urls(listmail_session)
-            for email_url in emails:
-                if email_url_to_id(email_url) > last_email_id:
-                    email_meta = get_email_metadata(listmail_session, email_url)
-                    discord_embed = get_email_metadata_embed(email_meta, email_url)
-                    print(f"sending message for email {email_url} at {formatted_current_time()}")
-                    await webhook.send("You've got mail!", embed=discord_embed)
-            
-            # update ID of the last email observed
-            new_last_email_id = email_url_to_id(get_last_email_url(emails))
-            if new_last_email_id != last_email_id:
-                print(f"will now alert for emails with IDs greater than {new_last_email_id}")
-                last_email_id = new_last_email_id
+        # reload config in case it changed
+        with open("private.json", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+        
+        # check for emails newer than the last one observed
+        listmail_session = login(config["email_password"])
+        emails = get_recent_email_urls(listmail_session)
+        for email_url in emails:
+            if email_url_to_id(email_url) > last_email_id:
+                email_meta = get_email_metadata(listmail_session, email_url)
+                discord_embed = get_email_metadata_embed(email_meta, email_url)
+                print(f"sending message for email {email_url} at {formatted_current_time()}")
+                async with aiohttp.ClientSession() as webhook_session:
+                    webhook = discord.Webhook.from_url(config["webhook_url"], session=webhook_session)
+                    await webhook.send(
+                        "You've got mail!",
+                        embed = discord_embed,
+                        file = await get_email_image_file(
+                            listmail_session, email_meta, email_url
+                        )
+                    )
+        
+        # update ID of the last email observed
+        new_last_email_id = email_url_to_id(get_last_email_url(emails))
+        if new_last_email_id != last_email_id:
+            print(f"will now alert for emails with IDs greater than {new_last_email_id}")
+            last_email_id = new_last_email_id
 
         # check again in 3 minutes
         await asyncio.sleep(60 * 3)
@@ -85,7 +104,7 @@ async def check_mail_forever():
 async def main():
     email_view_server.listen(8888)
     print("email viewer listening on port 8888")
-    print("starting discord bot")
+    print("starting webhook-based discord bot")
     await asyncio.create_task(check_mail_forever())
 
 

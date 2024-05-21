@@ -9,6 +9,8 @@ requests = "*"
 html2text = "*"
 python-dateutil = "*"
 tornado = "*"
+pytest-playwright = "*"
+python-slugify = "*"
 
 [dev-packages]
 

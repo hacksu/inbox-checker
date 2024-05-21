@@ -1,4 +1,4 @@
-from html import unescape
+from io import BytesIO
 import requests
 import re
 from itertools import islice
@@ -8,6 +8,7 @@ import dateutil
 
 from html2text import HTML2Text
 from dateutil.parser import parse as parse_date
+from playwright.async_api import async_playwright
 
 
 def login(password: str, list_name: str = "hacksu") -> requests.Session:
@@ -97,23 +98,29 @@ def get_email_metadata(session: requests.Session, email_url: str) -> EmailMetada
 
     # once we have the email page as formatted text, the subject, "from"
     # address, and timestamp are on the first three lines of the result
-    meta = list(islice(
-        (l.replace("[Hacksu]", "").strip("#\n _")
-            for l in text.splitlines() if len(l.strip())),
-        3
-    ))
+    meta = list(
+        islice(
+            # we pass two arguments to islice:
+            # a generator expression that yields stripped non-empty lines
+            (l.replace("[Hacksu]", "").strip("#\n _")
+                for l in text.splitlines() if len(l.strip())),
+            # the number of elements to retrieve from the generator expression
+            3
+        )
+    )
     return EmailMetadata(
-        meta[0],
-        deduplicate_string(meta[1]),
-        parse_date(
-            meta[2],
-            # need to tell it what EDT and EST mean
-            tzinfos={
+        subject = meta[0],
+        from_address = deduplicate_string(meta[1]),
+        timestamp = parse_date(
+            timestr = meta[2],
+            # need to tell it what "EDT" and "EST" mean since they are used in
+            # the date and time on the Mailman page
+            tzinfos = {
                 "EDT": dateutil.tz.gettz("US/Eastern"),
                 "EST": dateutil.tz.gettz("US/Eastern")
             }
         ),
-        get_email_html(session, email_url) is not None
+        has_html = get_email_html(session, email_url) is not None
     )
 
 
@@ -133,3 +140,24 @@ def get_email_html(session: requests.Session, email_url: str) -> str | None:
         return HTML2Text().handle(html_email_body)
     else:
         return None
+
+async def get_email_image(session: requests.Session, email_url: str) -> BytesIO:
+    html = get_email_html(session, email_url)
+
+    if html is None:
+        html = session.get(email_url).text
+    
+    async with async_playwright() as p:
+        browser = await p.firefox.launch()
+        page = await browser.new_page()
+        await page.set_viewport_size({"width": 800, "height": 800})
+        await page.set_content(html)
+        height = min(
+            1200,
+            await page.evaluate('document.documentElement.offsetHeight')
+        )
+        await page.set_viewport_size({"width": 800, "height": height})
+        screenshot = await page.screenshot()
+        await browser.close()
+
+        return BytesIO(screenshot)
