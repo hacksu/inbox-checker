@@ -77,8 +77,9 @@ def deduplicate_string(string: str) -> str:
 
 EmailMetadata = NamedTuple(
     "EmailMetadata",
-    [("subject", str), ("from_address", str), ("timestamp", datetime)]
+    [("subject", str), ("from_address", str), ("timestamp", datetime), ("has_html", bool)]
 )
+
 
 def get_email_metadata(session: requests.Session, email_url: str) -> EmailMetadata:
     """
@@ -111,10 +112,12 @@ def get_email_metadata(session: requests.Session, email_url: str) -> EmailMetada
                 "EDT": dateutil.tz.gettz("US/Eastern"),
                 "EST": dateutil.tz.gettz("US/Eastern")
             }
-        )
+        ),
+        get_email_html(session, email_url) is not None
     )
 
-def get_email_html(session: requests.Session, email_url: str) -> str:
+
+def get_email_html(session: requests.Session, email_url: str) -> str | None:
     """
         This grabs the HTML "attachment" from Mailman that contains the actual
         rich text content of the email.
@@ -129,4 +132,4 @@ def get_email_html(session: requests.Session, email_url: str) -> str:
         html_email_body = re.search(r"<tt>(.*)</tt>", html_email_page, flags=re.DOTALL).group(1)
         return HTML2Text().handle(html_email_body)
     else:
-        return email
+        return None

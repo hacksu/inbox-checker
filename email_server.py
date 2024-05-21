@@ -25,19 +25,23 @@ class MainHandler(tornado.web.RequestHandler):
         if email_url is None:
             self.write("<p>No email URL specified</p>")
         else:
-            framed_document = (
-                get_email_html(login(config["email_password"]), email_url)
-                    .replace("\n", " ")  # i don't think this is technically necessary
-                    .replace('"', '&quot;')
-            )
-            self.write(dedent(f"""
-                <!DOCTYPE HTML>
-                <html>
-                    <body>
-                        <iframe sandbox style="width: 100vw; height: 100vh" srcdoc="{framed_document}"></iframe>
-                    </body>
-                </html>
-            """))
+            email_html = get_email_html(login(config["email_password"]), email_url)
+            if email_html is not None:
+                framed_document = (
+                    email_html
+                        .replace("\n", " ")  # i don't think this is technically necessary
+                        .replace('"', '&quot;')
+                )
+                self.write(dedent(f"""
+                    <!DOCTYPE HTML>
+                    <html>
+                        <body>
+                            <iframe sandbox style="width: 100vw; height: 100vh" srcdoc="{framed_document}"></iframe>
+                        </body>
+                    </html>
+                """))
+            else:
+                self.redirect(email_url)
 
     def request_auth(self):
         self.set_header("WWW-Authenticate", 'Basic realm="Authentication Required"')
